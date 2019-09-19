@@ -15,7 +15,7 @@ use std::time::Duration;
 
 fn main() -> Result<(), Error> {
     let (output_send, output_recv): (crossbeam_channel::Sender<(Vec<u8>, Directory)>, _) =
-        crossbeam_channel::unbounded();
+        crossbeam_channel::bounded(1023);
 
     let output_thread = std::thread::spawn(move || {
         let mut stdout = BufferedStdout::new();
@@ -70,11 +70,6 @@ fn main() -> Result<(), Error> {
                         }
                     }
                 };
-                // Try to avoid running out of file handles
-                while out_send.len() > 1000 {
-                    eprintln!("sleeping");
-                    std::thread::sleep(Duration::from_millis(10));
-                }
                 let dir = match Directory::open(CStr::from_bytes(&current_dir_path)) {
                     Ok(d) => d,
                     Err(e) => {
