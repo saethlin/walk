@@ -7,9 +7,11 @@ edition = "2018"
 [dependencies]
 syscall = "0.2"
 libc = "0.2"
-arrayvec = {version = "0.4", default-features = false}
 crossbeam-channel = "0.3"
 num_cpus = "1.0"
+lazy_static = "1.0"
 
 [profile.release]
 debug = 1
+panic = 'abort'
+lto = true
