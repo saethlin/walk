@@ -1,6 +1,5 @@
-use crate::syscalls;
-use crate::Error;
 use std::sync::{Arc, Mutex};
+use veneer::{syscalls, Error};
 
 lazy_static::lazy_static! {
     pub static ref LOCK: Arc<Mutex<()>> = Arc::new(Mutex::new(()));

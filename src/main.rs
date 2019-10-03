@@ -1,13 +1,7 @@
-mod cstr;
-mod directory;
-mod error;
 mod output;
-mod syscalls;
-
-use cstr::CStr;
-use directory::Directory;
-use error::Error;
 use output::BufferedStdout;
+
+use veneer::{CStr, Directory, Error};
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -18,12 +12,10 @@ fn main() -> Result<(), Error> {
     let num_threads = num_cpus::get();
     let num_waiting = Arc::new(AtomicUsize::new(0));
 
-    let (recursion_send, recursion_recv): (
-        crossbeam_channel::Sender<Vec<u8>>,
-        crossbeam_channel::Receiver<Vec<u8>>,
-    ) = crossbeam_channel::unbounded();
+    let (recursion_send, recursion_recv): (crossbeam_channel::Sender<Vec<u8>>, _) =
+        crossbeam_channel::unbounded();
 
-    recursion_send.send(b".\0".to_vec()).unwrap();
+    recursion_send.send(b"/\0".to_vec()).unwrap();
 
     for _ in 0..num_threads {
         let recv = recursion_recv.clone();
@@ -73,11 +65,17 @@ fn main() -> Result<(), Error> {
                 if current_dir_path.last() != Some(&b'/') {
                     current_dir_path.push(b'/');
                 }
-                for entry in dir.iter() {
+                let contents = dir.read().unwrap();
+                for entry in contents.iter() {
+                    /*
                     if entry.name().as_bytes().get(0) == Some(&b'.') {
                         continue;
                     }
-                    if entry.d_type().unwrap_or(libc::DT_UNKNOWN) == libc::DT_DIR {
+                    */
+                    if entry.name().as_bytes() == b"." || entry.name().as_bytes() == b".." {
+                        continue;
+                    }
+                    if entry.d_type() == veneer::directory::DType::DIR {
                         let mut new_dir_path = path_pool.pop().unwrap_or_else(|| Vec::new());
                         new_dir_path.clear();
                         new_dir_path
@@ -92,7 +90,6 @@ fn main() -> Result<(), Error> {
                             .push(b'\n');
                     }
                 }
-                current_dir_path.push(0);
                 path_pool.push(current_dir_path);
             }
         }));
@@ -104,39 +101,3 @@ fn main() -> Result<(), Error> {
 
     Ok(())
 }
-
-/*
-fn par_walk(
-    path: &[u8],
-    sender: crossbeam_channel::Sender<(Vec<u8>, Directory)>,
-) -> Result<(), Error> {
-    let dir = match Directory::open(CStr::from_bytes(path)) {
-        Ok(d) => d,
-        Err(_) => {
-            return Ok(());
-        }
-    };
-    let mut dir_path = Vec::new();
-    for entry in dir.iter() {
-        if entry.name().as_bytes().get(0) == Some(&b'.') {
-            continue;
-        }
-        if entry.d_type()? == libc::DT_DIR {
-            dir_path.clear();
-            dir_path.extend_from_slice(path);
-            dir_path.pop();
-            if dir_path.last() != Some(&b'/') {
-                dir_path.push(b'/');
-            }
-            dir_path.extend(entry.name().as_bytes());
-            dir_path.push(0);
-            par_walk(&dir_path, sender.clone())?;
-        }
-    }
-    dir_path.clear();
-    dir_path.extend_from_slice(path);
-    dir_path.pop();
-    sender.send((dir_path, dir)).unwrap();
-    Ok(())
-}
-*/

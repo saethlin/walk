@@ -5,7 +5,7 @@ authors = ["Ben Kimock <kimockb@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-syscall = "0.2"
+veneer = {git = "https://github.com/saethlin/veneer"}
 libc = "0.2"
 crossbeam-channel = "0.3"
 num_cpus = "1.0"
