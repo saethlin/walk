@@ -1,11 +1,9 @@
 mod output;
-use output::BufferedStdout;
 
 use veneer::{CStr, Directory, Error};
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
 
 fn main() -> Result<(), Error> {
     let mut threads = Vec::new();
@@ -22,12 +20,12 @@ fn main() -> Result<(), Error> {
         let send = recursion_send.clone();
         let num_waiting = num_waiting.clone();
         let mut path_pool = Vec::new();
-        let mut out = BufferedStdout::new();
+        let mut buf = Vec::with_capacity(4096);
         threads.push(std::thread::spawn(move || {
             let mut is_waiting = false;
             'outer: loop {
                 let mut current_dir_path = 'inner: loop {
-                    if let Ok(path) = recv.recv_timeout(Duration::from_millis(10)) {
+                    if let Ok(path) = recv.try_recv() {
                         if is_waiting {
                             // Exit the waiting state if we were in it before
                             num_waiting.fetch_sub(1, Ordering::SeqCst);
@@ -76,7 +74,8 @@ fn main() -> Result<(), Error> {
                         continue;
                     }
                     if entry.d_type() == veneer::directory::DType::DIR {
-                        let mut new_dir_path = path_pool.pop().unwrap_or_else(|| Vec::new());
+                        let mut new_dir_path =
+                            path_pool.pop().unwrap_or_else(|| Vec::with_capacity(256));
                         new_dir_path.clear();
                         new_dir_path
                             .reserve(current_dir_path.len() + entry.name().as_bytes().len() + 1);
@@ -85,13 +84,25 @@ fn main() -> Result<(), Error> {
                         new_dir_path.push(0);
                         send.send(new_dir_path).unwrap();
                     } else {
-                        out.write(&current_dir_path)
-                            .write(entry.name().as_bytes())
-                            .push(b'\n');
+                        let entry_name = entry.name();
+                        if (buf.len() + current_dir_path.len() + entry_name.as_bytes().len() + 1)
+                            < buf.capacity()
+                        {
+                            buf.extend(&current_dir_path);
+                            buf.extend(entry_name.as_bytes());
+                            buf.push(b'\n');
+                        } else {
+                            crate::output::write_to_stdout(&buf).unwrap();
+                            buf.clear();
+                            buf.extend(&current_dir_path);
+                            buf.extend(entry_name.as_bytes());
+                            buf.push(b'\n');
+                        }
                     }
                 }
                 path_pool.push(current_dir_path);
             }
+            crate::output::write_to_stdout(&buf).unwrap();
         }));
     }
 

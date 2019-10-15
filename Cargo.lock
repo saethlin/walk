@@ -48,7 +48,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "veneer"
 version = "0.1.0"
-source = "git+https://github.com/saethlin/veneer#80458f22ccd04e184f30309e5eb0ee3e6b0db683"
+source = "git+https://github.com/saethlin/veneer#e41ee619435ab219e7a4fed8daf22bb1a3247f6a"
 dependencies = [
  "libc 0.2.62 (registry+https://github.com/rust-lang/crates.io-index)",
  "syscall 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -60,7 +60,6 @@ version = "0.1.0"
 dependencies = [
  "crossbeam-channel 0.3.9 (registry+https://github.com/rust-lang/crates.io-index)",
  "lazy_static 1.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "libc 0.2.62 (registry+https://github.com/rust-lang/crates.io-index)",
  "num_cpus 1.10.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "veneer 0.1.0 (git+https://github.com/saethlin/veneer)",
 ]
