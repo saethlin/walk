@@ -1,31 +1,65 @@
 mod output;
 
-use veneer::{CStr, Directory, Error};
+use crossbeam_deque::{Injector, Stealer, Worker};
+use veneer::{CStr, Directory};
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-fn main() -> Result<(), Error> {
+fn find_task<T>(local: &Worker<T>, global: &Injector<T>, stealers: &[Stealer<T>]) -> Option<T> {
+    // Pop a task from the local queue, if not empty.
+    local.pop().or_else(|| {
+        // Otherwise, we need to look for a task elsewhere.
+        std::iter::repeat_with(|| {
+            // Try stealing a batch of tasks from the global queue.
+            global
+                .steal_batch_and_pop(local)
+                // Or try stealing a task from one of the other threads.
+                .or_else(|| stealers.iter().map(|s| s.steal()).collect())
+        })
+        // Loop while no task was stolen and any steal operation needs to be retried.
+        .find(|s| !s.is_retry())
+        // Extract the stolen task, if there is one.
+        .and_then(|s| s.success())
+    })
+}
+
+fn main() {
     let mut threads = Vec::new();
     let num_threads = num_cpus::get();
     let num_waiting = Arc::new(AtomicUsize::new(0));
 
-    let (recursion_send, recursion_recv): (crossbeam_channel::Sender<Vec<u8>>, _) =
-        crossbeam_channel::unbounded();
+    let start = std::env::args()
+        .nth(1)
+        .map(|b| {
+            b.as_bytes()
+                .iter()
+                .cloned()
+                .chain(std::iter::once(0))
+                .collect()
+        })
+        .unwrap_or_else(|| b"/\0".to_vec());
 
-    recursion_send.send(b"/\0".to_vec()).unwrap();
+    let injector = Arc::new(Injector::new());
+    injector.push(start);
 
-    for _ in 0..num_threads {
-        let recv = recursion_recv.clone();
-        let send = recursion_send.clone();
+    let workers = (0..num_threads)
+        .map(|_| Worker::new_fifo())
+        .collect::<Vec<_>>();
+    let stealers = workers.iter().map(Worker::stealer).collect::<Vec<_>>();
+
+    for worker in workers {
+        let injector = injector.clone();
+        let stealers = stealers.clone();
+
         let num_waiting = num_waiting.clone();
         let mut path_pool = Vec::new();
         let mut buf = Vec::with_capacity(4096);
         threads.push(std::thread::spawn(move || {
             let mut is_waiting = false;
             'outer: loop {
-                let mut current_dir_path = 'inner: loop {
-                    if let Ok(path) = recv.try_recv() {
+                let mut current_dir_path: Vec<u8> = 'inner: loop {
+                    if let Some(path) = find_task(&worker, &injector, &stealers) {
                         if is_waiting {
                             // Exit the waiting state if we were in it before
                             num_waiting.fetch_sub(1, Ordering::SeqCst);
@@ -41,21 +75,10 @@ fn main() -> Result<(), Error> {
                         }
                     }
                 };
-                let dir = match Directory::open(CStr::from_bytes(&current_dir_path)) {
-                    Ok(d) => d,
-                    Err(e) => {
-                        if e.0 != 13 {
-                            eprintln!(
-                                "{:?} {:?}",
-                                e,
-                                std::str::from_utf8(
-                                    &current_dir_path[..current_dir_path.len() - 1]
-                                )
-                                .unwrap_or("??")
-                            );
-                        }
-                        continue; // Ignore errors in opening directories
-                    }
+                let dir = if let Ok(d) = Directory::open(CStr::from_bytes(&current_dir_path)) {
+                    d
+                } else {
+                    continue; // Ignore errors in opening directories
                 };
                 if current_dir_path.last() == Some(&0) {
                     current_dir_path.pop();
@@ -63,7 +86,11 @@ fn main() -> Result<(), Error> {
                 if current_dir_path.last() != Some(&b'/') {
                     current_dir_path.push(b'/');
                 }
-                let contents = dir.read().unwrap();
+                let contents = if let Ok(c) = dir.read() {
+                    c
+                } else {
+                    continue;
+                };
                 for entry in contents.iter() {
                     /*
                     if entry.name().as_bytes().get(0) == Some(&b'.') {
@@ -82,22 +109,18 @@ fn main() -> Result<(), Error> {
                         new_dir_path.extend(&current_dir_path);
                         new_dir_path.extend(entry.name().as_bytes());
                         new_dir_path.push(0);
-                        send.send(new_dir_path).unwrap();
+                        injector.push(new_dir_path);
                     } else {
                         let entry_name = entry.name();
                         if (buf.len() + current_dir_path.len() + entry_name.as_bytes().len() + 1)
-                            < buf.capacity()
+                            >= buf.capacity()
                         {
-                            buf.extend(&current_dir_path);
-                            buf.extend(entry_name.as_bytes());
-                            buf.push(b'\n');
-                        } else {
                             crate::output::write_to_stdout(&buf).unwrap();
                             buf.clear();
-                            buf.extend(&current_dir_path);
-                            buf.extend(entry_name.as_bytes());
-                            buf.push(b'\n');
                         }
+                        buf.extend(&current_dir_path);
+                        buf.extend(entry_name.as_bytes());
+                        buf.push(b'\n');
                     }
                 }
                 path_pool.push(current_dir_path);
@@ -109,6 +132,4 @@ fn main() -> Result<(), Error> {
     for t in threads {
         t.join().unwrap();
     }
-
-    Ok(())
 }

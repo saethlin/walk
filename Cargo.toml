@@ -6,7 +6,7 @@ edition = "2018"
 
 [dependencies]
 veneer = {git = "https://github.com/saethlin/veneer"}
-crossbeam-channel = "0.3"
+crossbeam-deque = "0.7"
 num_cpus = "1.0"
 lazy_static = "1.0"
 
