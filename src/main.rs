@@ -29,8 +29,14 @@ fn main() {
     let num_threads = num_cpus::get();
     let num_waiting = Arc::new(AtomicUsize::new(0));
 
+    let outer_re = Arc::new(
+        std::env::args()
+            .nth(1)
+            .map(|s| regex::Regex::new(&s).unwrap()),
+    );
+
     let start = std::env::args()
-        .nth(1)
+        .nth(2)
         .map(|b| {
             b.as_bytes()
                 .iter()
@@ -38,7 +44,7 @@ fn main() {
                 .chain(std::iter::once(0))
                 .collect()
         })
-        .unwrap_or_else(|| b"/\0".to_vec());
+        .unwrap_or_else(|| b".\0".to_vec());
 
     let injector = Arc::new(Injector::new());
     injector.push(start);
@@ -55,6 +61,7 @@ fn main() {
         let num_waiting = num_waiting.clone();
         let mut path_pool = Vec::new();
         let mut buf = Vec::with_capacity(4096);
+        let re = Arc::clone(&outer_re);
         threads.push(std::thread::spawn(move || {
             let mut is_waiting = false;
             'outer: loop {
@@ -110,17 +117,28 @@ fn main() {
                         new_dir_path.extend(entry.name().as_bytes());
                         new_dir_path.push(0);
                         injector.push(new_dir_path);
-                    } else {
-                        let entry_name = entry.name();
-                        if (buf.len() + current_dir_path.len() + entry_name.as_bytes().len() + 1)
-                            >= buf.capacity()
+                    }
+                    if let Ok(name_str) = std::str::from_utf8(entry.name().as_bytes()) {
+                        if re
+                            .as_ref()
+                            .as_ref()
+                            .map(|r| r.is_match(name_str))
+                            .unwrap_or(true)
                         {
-                            crate::output::write_to_stdout(&buf).unwrap();
-                            buf.clear();
+                            let entry_name = entry.name();
+                            if (buf.len()
+                                + current_dir_path.len()
+                                + entry_name.as_bytes().len()
+                                + 1)
+                                >= buf.capacity()
+                            {
+                                crate::output::write_to_stdout(&buf).unwrap();
+                                buf.clear();
+                            }
+                            buf.extend(&current_dir_path);
+                            buf.extend(entry_name.as_bytes());
+                            buf.push(b'\n');
                         }
-                        buf.extend(&current_dir_path);
-                        buf.extend(entry_name.as_bytes());
-                        buf.push(b'\n');
                     }
                 }
                 path_pool.push(current_dir_path);
