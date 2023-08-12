@@ -1,7 +1,7 @@
 mod output;
 
 use crossbeam_deque::{Injector, Stealer, Worker};
-use veneer::{CStr, Directory};
+use veneer::{CStr, fs::Directory};
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -107,7 +107,7 @@ fn main() {
                     if entry.name().as_bytes() == b"." || entry.name().as_bytes() == b".." {
                         continue;
                     }
-                    if entry.d_type() == veneer::directory::DType::DIR {
+                    if entry.d_type() == veneer::fs::DType::DIR {
                         let mut new_dir_path =
                             path_pool.pop().unwrap_or_else(|| Vec::with_capacity(256));
                         new_dir_path.clear();
